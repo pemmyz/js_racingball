@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Rolling Ball Game</title>
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- Import Maps: Three.js and Cannon-es -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+            }
+        }
+    </script>
+</head>
+<body>
+    
+    <div id="ui-layer">
+        <div id="score-container">
+            CREDITS: <span id="score">0</span>
+        </div>
+        <div id="controls-hint">
+            WASD / Arrows to Move <br>
+            Space to Brake <br>
+            R to Reset
+        </div>
+        <div id="game-over" class="hidden">
+            <h1>FALLEN!</h1>
+            <p>Respawning...</p>
+        </div>
+    </div>
+
+    <script type="module" src="script.js"></script>
+</body>
+</html>
