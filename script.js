@@ -7,24 +7,25 @@ const CONFIG = {
     ballMass: 5,
     moveForce: 20,
     brakeForce: 2,
-    cameraOffset: new THREE.Vector3(0, 4, -8), // Behind and above
+    jumpVelocity: 10, // Velocity needed to jump approx 5 units high
+    cameraOffset: new THREE.Vector3(0, 5, -10),
     cameraLerp: 0.1,
-    respawnY: -10, // Y level to trigger reset
+    respawnY: -10, 
     colors: {
         ball: 0x00ffff,
         ground: 0x222222,
         obstacle: 0xff4444,
+        dynamicBox: 0x8888ff,
         credit: 0xffd700
     }
 };
 
 // --- GLOBALS ---
 let scene, camera, renderer;
-let world; // Physics world
+let world; 
 let ballMesh, ballBody;
-let physicsObjects = []; // To sync mesh/body
 let collectibles = [];
-let movingObstacles = [];
+let movingObstacles = []; // Stores Rotating, Sliding, and Dynamic objects
 let score = 0;
 let isReseting = false;
 
@@ -32,16 +33,17 @@ const inputs = { w: false, a: false, s: false, d: false, space: false };
 
 // --- INITIALIZATION ---
 function init() {
-    // 1. Setup Three.js Scene
+    // 1. Setup Three.js
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x101015);
-    scene.fog = new THREE.Fog(0x101015, 10, 50);
+    scene.fog = new THREE.Fog(0x101015, 10, 60);
 
     camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     document.body.appendChild(renderer.domElement);
 
     // Lights
@@ -49,42 +51,39 @@ function init() {
     scene.add(ambientLight);
 
     const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(10, 20, 10);
+    dirLight.position.set(20, 40, 20);
     dirLight.castShadow = true;
-    dirLight.shadow.camera.top = 20;
-    dirLight.shadow.camera.bottom = -20;
-    dirLight.shadow.camera.left = -20;
-    dirLight.shadow.camera.right = 20;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    dirLight.shadow.camera.top = 50;
+    dirLight.shadow.camera.bottom = -50;
+    dirLight.shadow.camera.left = -50;
+    dirLight.shadow.camera.right = 50;
     scene.add(dirLight);
 
     // 2. Setup Cannon-es Physics
     world = new CANNON.World();
     world.gravity.set(0, -9.82, 0);
     
-    // Materials
     const defaultMaterial = new CANNON.Material('default');
     const defaultContactMaterial = new CANNON.ContactMaterial(defaultMaterial, defaultMaterial, {
         friction: 0.4,
-        restitution: 0.2, // Bounciness
+        restitution: 0.2,
     });
     world.addContactMaterial(defaultContactMaterial);
 
-    // 3. Create Player (Ball)
+    // 3. Create Objects
     createPlayer();
-
-    // 4. Generate Level
     generateLevel();
-
-    // 5. Input Listeners
     setupInputs();
 
-    // 6. Start Loop
+    // 4. Start Loop
     animate();
 }
 
-// --- PLAYER CREATION ---
+// --- PLAYER ---
 function createPlayer() {
-    // Three.js Mesh
+    // Mesh
     const geometry = new THREE.SphereGeometry(CONFIG.ballRadius, 32, 32);
     const material = new THREE.MeshStandardMaterial({ 
         color: CONFIG.colors.ball,
@@ -96,23 +95,23 @@ function createPlayer() {
     ballMesh.castShadow = true;
     scene.add(ballMesh);
 
-    // Cannon.js Body
+    // Body
     const shape = new CANNON.Sphere(CONFIG.ballRadius);
     ballBody = new CANNON.Body({
         mass: CONFIG.ballMass,
         shape: shape,
         position: new CANNON.Vec3(0, 2, 0),
-        linearDamping: 0.3, // Simulates air resistance / rolling friction
+        linearDamping: 0.3,
         angularDamping: 0.3
     });
     world.addBody(ballBody);
 }
 
-// --- LEVEL GENERATION SYSTEM ---
+// --- LEVEL GENERATION ---
 function generateLevel() {
-    // Helper to create static box platforms
+    
+    // 1. Static Platform Helper
     const createPlatform = (x, y, z, w, h, d, color = CONFIG.colors.ground) => {
-        // Visuals
         const geo = new THREE.BoxGeometry(w, h, d);
         const mat = new THREE.MeshStandardMaterial({ color: color });
         const mesh = new THREE.Mesh(geo, mat);
@@ -120,15 +119,14 @@ function generateLevel() {
         mesh.receiveShadow = true;
         scene.add(mesh);
 
-        // Physics
         const shape = new CANNON.Box(new CANNON.Vec3(w/2, h/2, d/2));
-        const body = new CANNON.Body({ mass: 0 }); // Mass 0 = Static
+        const body = new CANNON.Body({ mass: 0 });
         body.addShape(shape);
         body.position.set(x, y, z);
         world.addBody(body);
     };
 
-    // Helper to create rotating obstacle
+    // 2. Rotating Obstacle Helper
     const createRotator = (x, y, z, w, h, d, speed) => {
         const geo = new THREE.BoxGeometry(w, h, d);
         const mat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.obstacle });
@@ -146,50 +144,81 @@ function generateLevel() {
         movingObstacles.push({ mesh, body, speed, type: 'rotateY' });
     };
 
-    // Helper to create Collectibles
+    // 3. Sliding Obstacle Helper
+    const createSlider = (x, y, z, w, h, d, speed, range) => {
+        const geo = new THREE.BoxGeometry(w, h, d);
+        const mat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.obstacle });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(x, y, z);
+        mesh.castShadow = true;
+        scene.add(mesh);
+
+        const shape = new CANNON.Box(new CANNON.Vec3(w/2, h/2, d/2));
+        const body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+        body.addShape(shape);
+        body.position.set(x, y, z);
+        world.addBody(body);
+
+        movingObstacles.push({ 
+            mesh, body, speed, range, 
+            type: 'pingpongX', 
+            initialX: x 
+        });
+    };
+
+    // 4. Dynamic Smash Box Helper
+    const createSmashBox = (x, y, z) => {
+        const size = 0.8;
+        const geo = new THREE.BoxGeometry(size, size, size);
+        const mat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.dynamicBox });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(x, y, z);
+        mesh.castShadow = true;
+        scene.add(mesh);
+
+        const shape = new CANNON.Box(new CANNON.Vec3(size/2, size/2, size/2));
+        const body = new CANNON.Body({ mass: 1 });
+        body.addShape(shape);
+        body.position.set(x, y, z);
+        world.addBody(body);
+        
+        movingObstacles.push({ mesh, body, type: 'dynamic' });
+    };
+
+    // 5. Collectible Helper
     const createCredit = (x, y, z) => {
         const geo = new THREE.OctahedronGeometry(0.3);
-        const mat = new THREE.MeshStandardMaterial({ 
-            color: CONFIG.colors.credit, 
-            emissive: 0xffaa00,
-            emissiveIntensity: 0.5
-        });
+        const mat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.credit, emissive: 0xffaa00, emissiveIntensity: 0.5 });
         const mesh = new THREE.Mesh(geo, mat);
         mesh.position.set(x, y, z);
         scene.add(mesh);
-        
-        // No physics body for credits, we do distance check for optimization
         collectibles.push({ mesh, active: true });
     };
 
-    // --- MAP DESIGN ---
-    
-    // 1. Start Platform
+    // --- MAP LAYOUT ---
+
+    // Part 1: Start
     createPlatform(0, 0, 0, 4, 1, 10);
     createCredit(0, 1, 0);
 
-    // 2. Narrow Bridge
+    // Part 2: Bridge
     createPlatform(0, 0, 10, 1.5, 1, 10);
     createCredit(0, 1, 10);
 
-    // 3. Wide Area
+    // Part 3: Wide Area with Rotator
     createPlatform(0, 0, 25, 8, 1, 15);
-    
-    // 4. Obstacles in Wide Area
-    createRotator(0, 1.5, 25, 6, 0.5, 0.5, 2); // Spinning bar
-    createPlatform(-3, 1, 25, 1, 2, 1, CONFIG.colors.obstacle); // Static pillar
-    createPlatform(3, 1, 28, 1, 2, 1, CONFIG.colors.obstacle); // Static pillar
-
+    createRotator(0, 1.5, 25, 6, 0.5, 0.5, 2);
+    createPlatform(-3, 1, 25, 1, 2, 1, CONFIG.colors.obstacle);
+    createPlatform(3, 1, 28, 1, 2, 1, CONFIG.colors.obstacle);
     createCredit(-2, 1, 25);
     createCredit(2, 1, 25);
 
-    // 5. Ramp Up (Slope)
-    // Cannon supports rotations, so we rotate a box to make a ramp
+    // Part 4: Ramp
     const rampGeo = new THREE.BoxGeometry(4, 1, 10);
     const rampMat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.ground });
     const rampMesh = new THREE.Mesh(rampGeo, rampMat);
     rampMesh.position.set(0, 2, 38);
-    rampMesh.rotation.x = -Math.PI / 8; // Tilt up
+    rampMesh.rotation.x = -Math.PI / 8;
     rampMesh.receiveShadow = true;
     scene.add(rampMesh);
 
@@ -200,12 +229,51 @@ function generateLevel() {
     rampBody.quaternion.setFromEuler(-Math.PI / 8, 0, 0);
     world.addBody(rampBody);
 
-    // 6. Upper Platform
+    // Part 5: Upper Platform (Checkpoint)
     createPlatform(0, 4, 48, 6, 1, 6);
-    createCredit(0, 5, 48); // Goal credit
+    createCredit(0, 5, 48);
+
+    // --- EXTENSION ---
+
+    // Part 6: The Jump Gap (Requires 'E')
+    // Gap of 5 units (48 + 3 = 51 end, start next at 56)
+    createPlatform(0, 4, 60, 6, 1, 10); // Landing Pad
+    createCredit(0, 5, 60);
+
+    // Part 7: Sliding Pistons
+    createPlatform(0, 4, 80, 4, 1, 25); 
+    createSlider(0, 5, 75, 3, 1, 1, 2.0, 3); // Moves X
+    createSlider(0, 5, 80, 3, 1, 1, 2.5, -3); 
+    createSlider(0, 5, 85, 3, 1, 1, 3.0, 3);
+    createCredit(0, 5, 80);
+
+    // Part 8: The Drop Curve
+    // Drop down to Y=0
+    createPlatform(0, 0, 100, 4, 1, 8);
+    createCredit(0, 1, 100);
+
+    // Part 9: Smash Arena
+    createPlatform(10, 0, 110, 15, 1, 15);
+    // Connect previous to arena
+    createPlatform(5, 0, 105, 10, 1, 4); // Connector angled visually via position
+
+    // Pyramid of Boxes
+    for(let i=0; i<3; i++) {
+        for(let j=0; j<3; j++) {
+            createSmashBox(12 + i, 1 + j, 110);
+        }
+    }
+
+    // Goal
+    const goalGeo = new THREE.CylinderGeometry(0, 0.5, 2, 8);
+    const goalMat = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xff0000 });
+    const goalMesh = new THREE.Mesh(goalGeo, goalMat);
+    goalMesh.position.set(15, 2, 110);
+    scene.add(goalMesh);
+    collectibles.push({ mesh: goalMesh, active: true });
 }
 
-// --- INPUT HANDLING ---
+// --- INPUTS ---
 function setupInputs() {
     window.addEventListener('keydown', (e) => {
         switch(e.key.toLowerCase()) {
@@ -215,6 +283,12 @@ function setupInputs() {
             case 'd': inputs.d = true; break;
             case ' ': inputs.space = true; break;
             case 'r': resetGame(); break;
+            case 'e': 
+                // JUMP
+                if(Math.abs(ballBody.velocity.y) < 0.5) {
+                    ballBody.velocity.y = CONFIG.jumpVelocity;
+                }
+                break;
         }
     });
 
@@ -235,15 +309,11 @@ function setupInputs() {
     });
 }
 
-// --- GAME LOGIC ---
-
+// --- MAIN LOOP ---
 function updatePhysics() {
     if (isReseting) return;
 
-    // 1. Calculate Forces based on Camera Direction
-    // We want "Forward" (W) to be away from camera, not just +Z
-    
-    // Get camera direction projected on XZ plane
+    // 1. Camera-relative movement
     const forward = new THREE.Vector3();
     camera.getWorldDirection(forward);
     forward.y = 0;
@@ -271,29 +341,37 @@ function updatePhysics() {
         force.z += right.z * CONFIG.moveForce;
     }
 
-    // Apply Force
     ballBody.applyForce(force, ballBody.position);
 
-    // Brake (Linear Damping increase)
-    if (inputs.space) {
-        ballBody.linearDamping = 0.9;
-    } else {
-        ballBody.linearDamping = 0.3;
-    }
+    // Brake
+    if (inputs.space) ballBody.linearDamping = 0.9;
+    else ballBody.linearDamping = 0.3;
 
-    // 2. Step Physics World
+    // 2. Step World
     world.step(1 / 60);
 
-    // 3. Sync Ball Mesh
+    // 3. Sync Ball
     ballMesh.position.copy(ballBody.position);
     ballMesh.quaternion.copy(ballBody.quaternion);
 
-    // 4. Moving Obstacles Logic
+    // 4. Update Obstacles
     const time = Date.now() * 0.001;
     movingObstacles.forEach(obs => {
+        // Rotate
         if(obs.type === 'rotateY') {
             const angle = time * obs.speed;
             obs.body.quaternion.setFromEuler(0, angle, 0);
+            obs.mesh.quaternion.copy(obs.body.quaternion);
+        }
+        // Slider
+        else if(obs.type === 'pingpongX') {
+            const offset = Math.sin(time * obs.speed) * obs.range;
+            obs.body.position.x = obs.initialX + offset;
+            obs.mesh.position.copy(obs.body.position);
+        }
+        // Dynamic (Smash boxes)
+        else if(obs.type === 'dynamic') {
+            obs.mesh.position.copy(obs.body.position);
             obs.mesh.quaternion.copy(obs.body.quaternion);
         }
     });
@@ -306,31 +384,20 @@ function updatePhysics() {
 
 function updateCamera() {
     if(!ballMesh) return;
-
-    // Target position: Ball position + Offset
     const targetPos = ballMesh.position.clone().add(CONFIG.cameraOffset);
-    
-    // Smoothly interpolate current camera position to target
     camera.position.lerp(targetPos, CONFIG.cameraLerp);
-    
-    // Always look at the ball
     camera.lookAt(ballMesh.position);
 }
 
 function checkCollectibles() {
     const ballPos = ballMesh.position;
-    
     collectibles.forEach(item => {
         if (item.active) {
-            // Simple distance check
             const dist = ballPos.distanceTo(item.mesh.position);
-            
-            // Floating animation
             item.mesh.rotation.y += 0.05;
-            item.mesh.position.y = item.mesh.position.y + Math.sin(Date.now() * 0.005) * 0.005;
+            item.mesh.position.y += Math.sin(Date.now() * 0.005) * 0.005;
 
             if (dist < CONFIG.ballRadius + 0.5) {
-                // Collected
                 item.active = false;
                 scene.remove(item.mesh);
                 score++;
@@ -355,28 +422,23 @@ function triggerReset() {
 }
 
 function resetGame() {
-    // Reset Physics Position and Velocity
     ballBody.position.set(0, 2, 0);
     ballBody.velocity.set(0, 0, 0);
     ballBody.angularVelocity.set(0, 0, 0);
     
-    // Reset Mesh
     ballMesh.position.copy(ballBody.position);
     ballMesh.rotation.set(0,0,0);
 
-    // Reset Camera slightly
     camera.position.set(0, 5, -10);
 }
 
 function animate() {
     requestAnimationFrame(animate);
-
     updatePhysics();
     updateCamera();
     checkCollectibles();
-
     renderer.render(scene, camera);
 }
 
-// Start Game
+// Start
 init();
