@@ -101,8 +101,9 @@ Falling below the level triggers a respawn.
 
 ## 📜 License
 
+MIT License – free to use, modify, and redistribute.
+
 Free to use for learning, experimenting, and personal projects.  
-Add a license if you plan to publish or distribute.
 
 ---
 
