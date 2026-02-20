@@ -7,6 +7,12 @@ Control a ball through floating platforms, moving obstacles, ramps, jumps, and c
 
 ---
 
+## Screenshots
+
+### Game
+![Game 1](screenshots/game_1.png)
+
+
 ## ✨ Features
 
 - 🎥 Smooth third-person camera following the ball  
