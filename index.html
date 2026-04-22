@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>3D Rolling Ball Game</title>
     <link rel="stylesheet" href="style.css">
     
@@ -19,6 +19,22 @@
 </head>
 <body>
     
+    <!-- Start Menu & Calibration Overlay -->
+    <div id="menu-layer">
+        <div id="start-menu">
+            <h1>3D Rolling Ball</h1>
+            <p>Select your controls:</p>
+            <button id="btn-keyboard">⌨️ Keyboard / Gamepad</button>
+            <button id="btn-gyro">📱 Gyro / 🖱️ Mouse (Tilt)</button>
+        </div>
+        
+        <div id="calibration-screen" class="hidden">
+            <h2>Get Ready...</h2>
+            <p>Place device flat on the table, OR center your mouse.</p>
+            <div id="countdown">3</div>
+        </div>
+    </div>
+
     <div id="ui-layer">
         <div id="score-container">
             CREDITS: <span id="score">0</span>

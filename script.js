@@ -31,6 +31,18 @@ let isReseting = false;
 
 const inputs = { w: false, a: false, s: false, d: false, space: false };
 
+// --- GYRO / MOUSE GLOBALS ---
+let gameState = 'MENU'; // 'MENU', 'CALIBRATING', 'PLAYING'
+let useGyro = false;
+let isMobile = false; 
+let baseBeta = 0;
+let baseGamma = 0;
+let tiltX = 0; 
+let tiltY = 0; 
+let smoothTiltX = 0; // For smooth visual camera interpolation
+let smoothTiltY = 0;
+const maxTilt = 30;
+
 // --- INITIALIZATION ---
 function init() {
     // 1. Setup Three.js
@@ -311,7 +323,12 @@ function setupInputs() {
 
 // --- MAIN LOOP ---
 function updatePhysics() {
-    if (isReseting) return;
+    // Stop if resetting or in the menu/calibration
+    if (isReseting || gameState !== 'PLAYING') return;
+
+    // Smooth tilts for physics and visuals
+    smoothTiltX += (tiltX - smoothTiltX) * 0.15;
+    smoothTiltY += (tiltY - smoothTiltY) * 0.15;
 
     // 1. Camera-relative movement
     const forward = new THREE.Vector3();
@@ -323,23 +340,29 @@ function updatePhysics() {
     right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
 
     const force = new CANNON.Vec3(0, 0, 0);
+    
+    let moveX = 0;
+    let moveZ = 0;
 
-    if (inputs.w) {
-        force.x += forward.x * CONFIG.moveForce;
-        force.z += forward.z * CONFIG.moveForce;
+    if (useGyro) {
+        // Tilt Controls (Mouse or Gyro)
+        // Positive Y = Pitch forward
+        // Positive X = Roll right
+        const normY = (smoothTiltY / maxTilt); 
+        const normX = (smoothTiltX / maxTilt);  
+
+        moveX = (forward.x * normY) + (right.x * normX);
+        moveZ = (forward.z * normY) + (right.z * normX);
+    } else {
+        // Keyboard controls
+        if (inputs.w) { moveX += forward.x; moveZ += forward.z; }
+        if (inputs.s) { moveX -= forward.x; moveZ -= forward.z; }
+        if (inputs.a) { moveX -= right.x; moveZ -= right.z; }
+        if (inputs.d) { moveX += right.x; moveZ += right.z; }
     }
-    if (inputs.s) {
-        force.x -= forward.x * CONFIG.moveForce;
-        force.z -= forward.z * CONFIG.moveForce;
-    }
-    if (inputs.a) {
-        force.x -= right.x * CONFIG.moveForce;
-        force.z -= right.z * CONFIG.moveForce;
-    }
-    if (inputs.d) {
-        force.x += right.x * CONFIG.moveForce;
-        force.z += right.z * CONFIG.moveForce;
-    }
+
+    force.x = moveX * CONFIG.moveForce;
+    force.z = moveZ * CONFIG.moveForce;
 
     ballBody.applyForce(force, ballBody.position);
 
@@ -357,20 +380,15 @@ function updatePhysics() {
     // 4. Update Obstacles
     const time = Date.now() * 0.001;
     movingObstacles.forEach(obs => {
-        // Rotate
         if(obs.type === 'rotateY') {
             const angle = time * obs.speed;
             obs.body.quaternion.setFromEuler(0, angle, 0);
             obs.mesh.quaternion.copy(obs.body.quaternion);
-        }
-        // Slider
-        else if(obs.type === 'pingpongX') {
+        } else if(obs.type === 'pingpongX') {
             const offset = Math.sin(time * obs.speed) * obs.range;
             obs.body.position.x = obs.initialX + offset;
             obs.mesh.position.copy(obs.body.position);
-        }
-        // Dynamic (Smash boxes)
-        else if(obs.type === 'dynamic') {
+        } else if(obs.type === 'dynamic') {
             obs.mesh.position.copy(obs.body.position);
             obs.mesh.quaternion.copy(obs.body.quaternion);
         }
@@ -384,9 +402,31 @@ function updatePhysics() {
 
 function updateCamera() {
     if(!ballMesh) return;
-    const targetPos = ballMesh.position.clone().add(CONFIG.cameraOffset);
+    
+    const offset = CONFIG.cameraOffset.clone();
+
+    if (useGyro && gameState === 'PLAYING') {
+        // 1. Visually Pitch the board (tilt forwards/backwards)
+        // Orbit the camera vertically based on forward/backward tilt
+        const pitchMult = 0.6; // Visual intensity multiplier
+        const pitchAngle = THREE.MathUtils.degToRad(smoothTiltY * pitchMult);
+        
+        // Apply orbit around the local X-axis
+        offset.applyAxisAngle(new THREE.Vector3(1, 0, 0), pitchAngle);
+    }
+
+    const targetPos = ballMesh.position.clone().add(offset);
     camera.position.lerp(targetPos, CONFIG.cameraLerp);
+    
+    // Always look exactly at the ball
     camera.lookAt(ballMesh.position);
+
+    if (useGyro && gameState === 'PLAYING') {
+        // 2. Visually Roll the board (tilt left/right)
+        // Roll the actual camera to create the illusion that the horizon/board is rolling
+        const rollMult = 0.5; // Visual intensity multiplier
+        camera.rotateZ(THREE.MathUtils.degToRad(smoothTiltX * rollMult));
+    }
 }
 
 function checkCollectibles() {
@@ -440,5 +480,133 @@ function animate() {
     renderer.render(scene, camera);
 }
 
-// Start
+// Start visual engine immediately
 init();
+
+
+// --- MENU, GYRO & MOUSE LOGIC ---
+
+const menuLayer = document.getElementById('menu-layer');
+const startMenu = document.getElementById('start-menu');
+const calibrationScreen = document.getElementById('calibration-screen');
+const countdownEl = document.getElementById('countdown');
+
+document.getElementById('btn-keyboard').addEventListener('click', () => {
+    useGyro = false;
+    gameState = 'PLAYING';
+    menuLayer.classList.remove('hidden'); // Triggers CSS fade
+    setTimeout(() => menuLayer.style.display = 'none', 500);
+});
+
+document.getElementById('btn-gyro').addEventListener('click', async () => {
+    if (!window.isSecureContext) {
+        alert("WARNING: Your browser may block sensors because this connection is not secure (HTTPS).");
+    }
+
+    // Request permissions for iOS 13+ devices
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        try {
+            const permission = await DeviceOrientationEvent.requestPermission();
+            if (permission !== 'granted') {
+                console.warn("Sensors denied. Mouse control will be used instead.");
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    useGyro = true;
+    attachSensors();
+    attachMouse();
+    
+    // Switch UI to calibration/get-ready screen
+    startMenu.classList.add('hidden');
+    calibrationScreen.classList.remove('hidden');
+    startCalibration();
+});
+
+function calculateTilt(rawValue) {
+    const aggressiveness = 0.15; 
+    return Math.sign(rawValue) * maxTilt * (1 - Math.exp(-aggressiveness * Math.abs(rawValue)));
+}
+
+function attachSensors() {
+    window.addEventListener('deviceorientation', (e) => {
+        if (e.beta == null || e.gamma == null) return;
+        if (e.beta === 0 && e.gamma === 0) return;
+
+        isMobile = true; // Device has gyro, so we ignore mouse inputs
+
+        if (gameState === 'CALIBRATING') {
+            baseBeta = e.beta;
+            baseGamma = e.gamma;
+        } else if (gameState === 'PLAYING') {
+            let rawBeta = e.beta - baseBeta;
+            let rawGamma = e.gamma - baseGamma;
+
+            // Handle phone landscape/portrait orientations
+            let angle = 0;
+            if (screen && screen.orientation && screen.orientation.angle !== undefined) {
+                angle = screen.orientation.angle;
+            } else if (typeof window.orientation !== 'undefined') {
+                angle = window.orientation;
+            }
+
+            let orientedX, orientedY;
+
+            if (angle === 90) { 
+                orientedX = rawBeta;
+                orientedY = -rawGamma;
+            } else if (angle === -90 || angle === 270) { 
+                orientedX = -rawBeta;
+                orientedY = rawGamma;
+            } else if (angle === 180) { 
+                orientedX = -rawGamma;
+                orientedY = -rawBeta;
+            } else { 
+                orientedX = rawGamma;
+                orientedY = rawBeta;
+            }
+
+            tiltX = calculateTilt(orientedX);
+            tiltY = calculateTilt(orientedY);
+        }
+    });
+}
+
+function attachMouse() {
+    window.addEventListener('mousemove', (e) => {
+        // If not playing, or on a mobile device, or gyro option isn't selected, ignore mouse
+        if (gameState !== 'PLAYING' || isMobile || !useGyro) return;
+        
+        let centerX = window.innerWidth / 2;
+        let centerY = window.innerHeight / 2;
+        
+        let normX = (e.clientX - centerX) / centerX;
+        let normY = (e.clientY - centerY) / centerY;
+        
+        let rawX = normX * maxTilt;
+        let rawY = normY * maxTilt;
+        
+        tiltX = calculateTilt(rawX);
+        tiltY = calculateTilt(rawY);
+    });
+}
+
+function startCalibration() {
+    gameState = 'CALIBRATING';
+    let count = 3;
+    countdownEl.innerText = count;
+
+    const interval = setInterval(() => {
+        count--;
+        countdownEl.innerText = count;
+        
+        if (count <= 0) {
+            clearInterval(interval);
+            gameState = 'PLAYING';
+            menuLayer.classList.remove('hidden'); 
+            setTimeout(() => menuLayer.style.display = 'none', 500);
+        }
+    }, 1000);
+}
