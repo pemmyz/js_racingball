@@ -5,6 +5,8 @@
 A browser-based **3D rolling ball platformer** built with **Three.js** for rendering and **Cannon‑ES** for physics.  
 Control a ball through floating platforms, moving obstacles, ramps, jumps, and collectibles — all rendered in real-time WebGL.
 
+## Play it now: https://pemmyz.github.io/js_racingball/
+
 ---
 
 ## Screenshots
