@@ -247,7 +247,7 @@ function generateLevel() {
 
     // --- EXTENSION ---
 
-    // Part 6: The Jump Gap (Requires 'E')
+    // Part 6: The Jump Gap
     // Gap of 5 units (48 + 3 = 51 end, start next at 56)
     createPlatform(0, 4, 60, 6, 1, 10); // Landing Pad
     createCredit(0, 5, 60);
@@ -287,6 +287,13 @@ function generateLevel() {
 
 // --- INPUTS ---
 function setupInputs() {
+    // Jump Logic Helper
+    const attemptJump = () => {
+        if(Math.abs(ballBody.velocity.y) < 0.5) {
+            ballBody.velocity.y = CONFIG.jumpVelocity;
+        }
+    };
+
     window.addEventListener('keydown', (e) => {
         switch(e.key.toLowerCase()) {
             case 'w': inputs.w = true; break;
@@ -295,12 +302,7 @@ function setupInputs() {
             case 'd': inputs.d = true; break;
             case ' ': inputs.space = true; break;
             case 'r': resetGame(); break;
-            case 'e': 
-                // JUMP
-                if(Math.abs(ballBody.velocity.y) < 0.5) {
-                    ballBody.velocity.y = CONFIG.jumpVelocity;
-                }
-                break;
+            case 'e': attemptJump(); break;
         }
     });
 
@@ -313,6 +315,20 @@ function setupInputs() {
             case ' ': inputs.space = false; break;
         }
     });
+
+    // MOUSE BUTTON 1 (Left Click) to Jump
+    window.addEventListener('mousedown', (e) => {
+        if (e.button === 0 && gameState === 'PLAYING') {
+            attemptJump();
+        }
+    });
+
+    // TAP SCREEN to Jump
+    window.addEventListener('touchstart', (e) => {
+        if (gameState === 'PLAYING') {
+            attemptJump();
+        }
+    }, { passive: false });
 
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
@@ -407,8 +423,8 @@ function updateCamera() {
 
     if (useGyro && gameState === 'PLAYING') {
         // 1. Visually Pitch the board (tilt forwards/backwards)
-        // Orbit the camera vertically based on forward/backward tilt
-        const pitchMult = 0.6; // Visual intensity multiplier
+        // Reduced pitch multiplier so board doesn't visually tilt too aggressively
+        const pitchMult = 0.3; 
         const pitchAngle = THREE.MathUtils.degToRad(smoothTiltY * pitchMult);
         
         // Apply orbit around the local X-axis
@@ -423,8 +439,8 @@ function updateCamera() {
 
     if (useGyro && gameState === 'PLAYING') {
         // 2. Visually Roll the board (tilt left/right)
-        // Roll the actual camera to create the illusion that the horizon/board is rolling
-        const rollMult = 0.5; // Visual intensity multiplier
+        // Reduced roll multiplier to keep control stable
+        const rollMult = 0.25; 
         camera.rotateZ(THREE.MathUtils.degToRad(smoothTiltX * rollMult));
     }
 }
@@ -526,8 +542,9 @@ document.getElementById('btn-gyro').addEventListener('click', async () => {
 });
 
 function calculateTilt(rawValue) {
-    const aggressiveness = 0.15; 
-    return Math.sign(rawValue) * maxTilt * (1 - Math.exp(-aggressiveness * Math.abs(rawValue)));
+    // Linear strict clamping - no exponential curves. 
+    // This makes the ball tilt perfectly linear to your mouse/gyro movements.
+    return Math.max(-maxTilt, Math.min(maxTilt, rawValue));
 }
 
 function attachSensors() {

@@ -6,6 +6,8 @@ body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     color: white;
     touch-action: none; /* Prevents mobile pull-to-refresh/scrolling */
+    user-select: none; /* Prevents text selection while tapping to jump */
+    -webkit-user-select: none;
 }
 
 canvas {
@@ -20,7 +22,7 @@ canvas {
     left: 0;
     width: 100%;
     height: 100%;
-    pointer-events: none; /* Let clicks pass through to canvas if needed */
+    pointer-events: none; /* Let clicks pass through to canvas */
     z-index: 10;
 }
 
@@ -74,6 +76,7 @@ canvas {
     align-items: center;
     z-index: 100;
     transition: opacity 0.5s ease;
+    pointer-events: auto; /* Ensure menu catches clicks */
 }
 
 #start-menu, #calibration-screen {
